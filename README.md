@@ -1,3 +1,13 @@
+<!--
+  DSH 插件生态公约声明（plugin-ecosystem-convention · 组合优先/声明清晰/兼容优先）
+  purpose: 会话应急删帧：删除最近 N 帧（step 粒度）事件并从上下文剔除，支持审核错误自动触发
+  inject: 'tools'
+  tools: session_eject_*
+  runtime: host-only
+  envDeps: 无（纯逻辑/标准 Node）
+  boundary: 无特殊授权边界
+  compat: cordis ^4.0.1 / dsh-tools ^0.1.0-rc.6
+-->
 # dsh-session-eject — 会话应急删帧插件
 
 > 2026-08-18 主人需求开发：模型走第三方服务有外部审核，会话上下文一旦混入敏感内容，整个会话将因审核无法使用。本插件把「近几帧」从会话事件流中物理删除，重启后模型上下文不再包含被删内容。
