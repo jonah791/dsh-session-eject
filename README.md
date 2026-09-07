@@ -10,6 +10,12 @@
 -->
 # dsh-session-eject — 会话应急删帧插件
 
+
+<p align="center">
+  <a href="https://github.com/jonah791/dsh-session-eject"><img src="https://img.shields.io/badge/version-0.1.1-blue" alt="version"></a>
+  <img src="https://img.shields.io/badge/License-MIT-green" alt="license">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6" alt="TypeScript">
+</p>
 > 2026-08-18 主人需求开发：模型走第三方服务有外部审核，会话上下文一旦混入敏感内容，整个会话将因审核无法使用。本插件把「近几帧」从会话事件流中物理删除，重启后模型上下文不再包含被删内容。
 
 ## 能力
