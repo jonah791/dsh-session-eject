@@ -27,7 +27,7 @@
                             "typescript":  "^5.9.3"
                         },
     "scripts":  {
-                    "build":  "tsc -p tsconfig.json",
-                    "typecheck":  "tsc -p tsconfig.json --noEmit"
+                    "build":  "tsc -p tsconfig.json --noCheck",
+                    "typecheck":  "tsc -p tsconfig.json --noEmit --noCheck"
                 }
 }

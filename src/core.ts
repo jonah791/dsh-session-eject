@@ -244,10 +244,18 @@ function rebaseRow(row: SessionRow, seqMap: Map<number, number>): string {
   if (typeof obj['surfaceOp'] === 'object' && obj['surfaceOp'] !== null) {
     const op = obj['surfaceOp'] as Record<string, unknown>
     if (op['op'] === 'replace') {
-      const newStart = typeof op['start'] === 'number' ? seqMap.get(op['start'] as number) : undefined
-      const newEnd = typeof op['end'] === 'number' ? seqMap.get(op['end'] as number) : undefined
-      if (newStart !== undefined) op['start'] = newStart
-      if (newEnd !== undefined) op['end'] = newEnd
+      // V3 canonical envelope（2026-09-10 修复）：现行键名是 startSeq/endSeq；旧
+      // v2 形态 start/end 仅需兼容历史文件——只认旧键名会漏改 V3 日志的 replace 引用
+      const remap = (key: string): void => {
+        const value = op[key]
+        if (typeof value !== 'number') return
+        const mapped = seqMap.get(value)
+        if (mapped !== undefined) op[key] = mapped
+      }
+      remap('startSeq')
+      remap('endSeq')
+      remap('start')
+      remap('end')
     }
   }
 
