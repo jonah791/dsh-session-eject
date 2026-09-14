@@ -150,15 +150,31 @@ export function readHeaderInfo(file: string): { headerLine: string; id: string }
   }
 }
 
-/** 递归寻找所有名为 session.jsonl.zstd 的会话文件 */
-function collectSessionFiles(root: string, depth = 0): string[] {
+/**
+ * 会话日志文件名判据（纯函数，可离线测试）。
+ *
+ * 2026-09-14 修复（可维护性补课发现）：旧判据写死 `entry.name === 'session.jsonl.zstd'`，
+ * 而线上实际是 `session.v3.jsonl.zstd`（实测 37 个 v3 / 1 个 v2 / 0 个旧名）⇒ **0 命中**，
+ * 三个工具全废（真实调用 `session_eject_status` 返回全 undefined）。
+ * 放宽为「前缀 session + 后缀 .jsonl.zstd」，保留对旧名的兼容；用正则而非 startsWith，
+ * 避免把 `session-backup.jsonl.zstd` 之类的旁车文件误当会话。
+ */
+const SESSION_LOG_RE = /^session(\.[A-Za-z0-9_-]+)*\.jsonl\.zstd$/
+
+/** 该文件名是否会话日志（`session.jsonl.zstd` / `session.v3.jsonl.zstd` …）。 */
+export function isSessionLogName(name: string): boolean {
+  return SESSION_LOG_RE.test(name)
+}
+
+/** 递归寻找所有会话日志（`session[.vN].jsonl.zstd`；深度上限 4，缺根目录返回空表不抛）。 */
+export function collectSessionFiles(root: string, depth = 0): string[] {
   if (depth > 4 || !existsSync(root)) return []
   const out: string[] = []
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const full = join(root, entry.name)
     if (entry.isDirectory()) {
       out.push(...collectSessionFiles(full, depth + 1))
-    } else if (entry.isFile() && entry.name === 'session.jsonl.zstd') {
+    } else if (entry.isFile() && isSessionLogName(entry.name)) {
       out.push(full)
     }
   }
