@@ -56,7 +56,7 @@
 |------|------------|------|
 | `dshHome()` | `process.env.DSH_HOME ?? join(homedir(), '.dsh')`（`src/core.ts`） | 与平台约定一致 |
 | `sessionsRoot()` | `process.env.DSH_SESSIONS_ROOT ?? join(dshHome(), 'sessions')`（`src/core.ts`） | 可被配置覆盖（`root = () => config.sessionsRoot ?? sessionsRoot()`） |
-| 会话文件 | `collectSessionFiles()` 只收 `entry.name === 'session.jsonl.zstd'`，递归深度 ≤ 4 | ⚠ 与线上实际文件名不一致，见 §8 / §10 U1 |
+| 会话文件 | `collectSessionFiles()` 以 `SESSION_LOG_RE`（`src/core.ts:isSessionLogName`）匹配**前缀 `session` + 后缀 `.jsonl.zstd`**，递归深度 ≤ 4 | ✅ 2026-09-14 `1f42bfe` **已修复**：旧判据写死 `entry.name === 'session.jsonl.zstd'` ⇒ 线上 0 命中（实测 37×v3 / 1×v2 / 0×旧名）、三工具全废；改用正则而非 `startsWith`，是为避免把 `session-backup.jsonl.zstd` 之类旁车文件误当会话。行为证据见 §7 A6 |
 | 投影缓存 | `join(dshHome(), 'storages', 'session_projcache.json')`（`cleanProjectionCache`） | 删 `data.tables.sessions[sessionId]` 后 `tmp + renameSync` 写回 |
 | 自动触发标记 | `join(dshHome(), 'session-eject-marker.json')`（`markerFile()`） | 形状 `{ count: number, lastAt: number }`；读失败回落 `{count:0,lastAt:0}`，写失败**不阻断主流程** |
 | 重写临时文件 | `file + '.eject-tmp'`（删帧）/ `file + '.repair-tmp'`（修复） | rename 失败 → `copyFileSync(tmp, file)` + `rmSync(tmp)`（弱原子性） |
@@ -108,14 +108,15 @@
 | A3 | 删帧后 projcache 中该会话条目消失 | 前后对比 `<DSH_HOME>/storages/session_projcache.json` 的 `tables.sessions[sessionId]` | **待验收** |
 | A4 | 自动面命中后 marker 递增 + 进程退出 + 守护拉起 | `<DSH_HOME>/session-eject-marker.json` 的 `count` +1、`lastAt` 为当刻；日志行 `[content-phrase] 自动删帧 …` | **待验收** |
 | A5 | 超 `maxAutoTriggers` 且 10 分钟内 → 抑制 | 日志 `auto-trigger suppressed（连续触发已达上限 N 次）` | **待验收** |
-| A6 | 能定位到线上会话文件 | `Get-ChildItem -Recurse -Force -File -Filter *jsonl.zstd E:\alice\.dsh\sessions \| Group-Object Name` → **`session.v3.jsonl.zstd`=34 / `session.v2.jsonl.zstd`=1 / `session.jsonl.zstd`=0**；代码字面量见 `lib/core.js:116` | **已实测：判为不匹配（当前构建定位不到任何线上会话文件）** |
+| A6 | 能定位到线上会话文件 | ① 落盘清点：`Get-ChildItem -Recurse -Force -File -Filter *jsonl.zstd E:\alice\.dsh\sessions \| Group-Object Name` → **`session.v3.jsonl.zstd`=34 / `session.v2.jsonl.zstd`=1 / `session.jsonl.zstd`=0**；② **行为判据**：调 `session_eject_status` 应能答出 `sessionId/file/totalSteps` | ✅ **已修复并实测（2026-09-22 复验）**：修复前判「不匹配」（旧判据 0 命中 ⇒ 三工具全废）；`1f42bfe` 放宽为「前缀+后缀」正则后，`session_eject_status` 实测返回 `session=session-005ddf46-… steps=2393 rows=16143 seq ok` ⇒ **能定位到会话文件**。⚠ 判据 ② 才是关键：只清点文件名清单**证明不了工具能定位**（前者是实现所处环境，后者才是工具行为） |
 | A7 | dryRun 不落盘 | dryRun 后文件 mtime 不变、`session_projcache.json` 不变 | **待验收** |
 
 ## 8 · 与实现的关系
 
 - 主实现：`src/index.ts`（工具注册 + 自动面 + config）、`src/core.ts`（定位/解析/边界/rebase/重写/缓存清理/断档诊断）、`src/zstd.ts`（多帧容器 scan/decompress/compress）。
 - 构建产物：`lib/index.js`、`lib/core.js`、`lib/zstd.js`（`main: lib/index.js`）；`npm run build` = `tsc -p tsconfig.json --noCheck`（**带 `--noCheck`：类型错误不会挡住构建**）。
-- **未实现/未验证部分显式标注**：① **文件名不匹配（A6）**——`collectSessionFiles` 只认 `session.jsonl.zstd`，线上是 `session.v3.jsonl.zstd`（34 个）/`session.v2.jsonl.zstd`（1 个），故三个工具当前会在 `locateSessionFile` 处返回「找不到会话文件」；本文只记事实，修复不在本次任务范围。② `eventRows/totalEvents` 依赖 `parseLog` 的读取快照（writer 正在写入时为毫秒级窗口，README 已声明可接受）。③ 自动面**无持久轨迹**：`ctx.logger` 不落盘、marker 只记 `count/lastAt`——「触发过几次、哪一轮」事后不可完整重建（§5.22 第 2 条不满足）。
+- **已修复（原「未实现」项）**：① ~~文件名不匹配（A6）~~ —— `1f42bfe`（2026-09-14）把 `collectSessionFiles` 的判据从写死的 `session.jsonl.zstd` 放宽为 `SESSION_LOG_RE`（前缀 `session` + 后缀 `.jsonl.zstd`；用正则而非 `startsWith` 以免误吃 `session-backup.jsonl.zstd` 之类旁车）。行为证据见 §7 A6（`session_eject_status` 实测可定位）。⏳ 两点如实标注：**回归判据目前只在单测**（`tests/session-file.test.mjs`）；**旧名兼容分支线上测不到**（线上 0 个旧名文件）——这是「测不到」，不是「未修」，两者不可混为一谈。
+- **未实现/未验证部分显式标注**：① `eventRows/totalEvents` 依赖 `parseLog` 的读取快照（writer 正在写入时为毫秒级窗口，README 已声明可接受）。② 自动面**无持久轨迹**：`ctx.logger` 不落盘、marker 只记 `count/lastAt`——「触发过几次、哪一轮」事后不可完整重建（§5.22 第 2 条不满足，见 §10 U2）。
 - **生效判据**（改了代码后怎么证明真的生效）：① 比对 `lib/*.js` mtime 与 **web 进程启动时间**（`.dsh/plugin-boot.jsonl` 最后一行 `processStartMs`）——产物 mtime 必须**早于**进程启动才算被当前进程加载（§5.11「重建 ≠ 生效」）；本次核对：`lib/index.js` mtime `2026-09-11 12:55:16` 早于当前进程 `2026-09-14 10:05:47`，且该账本 `live[]` 含 `dsh-session-eject`，且 `src/core.ts`(`08:27:09`) 早于 `lib/core.js` → 跑的就是这份产物。② 行为判据：`session_eject_status` 应能答出 `sessionId/file/totalSteps`——**返回「找不到会话文件」即 A6 缺陷在场**；再 `session_eject_recent {frames:1, dryRun:true}` 看 `rebased` 与 `removedSteps`。
 - **回退**（出问题怎么办）：① 代码/语义问题 → `git -C E:/alice/self-plugins/dsh-session-eject revert`（或 `checkout <上个提交>`）+ `npm run build`，按「生效判据」重验；② 整体下线 → `plugin_unmount dsh-session-eject`（写 patch + 重启）或临时 `plugin_stop`；③ 误删帧无备份、**不可逆**——删帧前建议先 `Copy-Item` 该 `session*.jsonl.zstd`；④ 回退后仍异常 → 用 §5.20 的 `semantic_check` 复核本文与实现是否再度漂移。
 
@@ -128,10 +129,14 @@
   - 语义**被补充**：`computeBoundary` 的「帧数不足按实际帧数全删尾部」；自动面限流是**时间窗**（`maxAutoTriggers` 且 10 分钟内）而非「累计上限即永久停用」；`--noCheck` 构建不挡类型错误。
   - 语义**被修正**：源码注释/工具描述里的 `session.jsonl.zstd` 与线上实际文件名 `session.v3.jsonl.zstd` 不一致——按**双向取证**（源码字面量 + 落盘清点）记录，不沿用注释口径。
   - 教训（同时回写技能 `semantic-doc-first`）：**路径类契约必须与落盘实测对照**，只读注释会写出「文档对、现实错」的语义。
+- 2026-09-22 复核回写（由 `semantic_check` 的 D3「实现比文档新」触发）：
+  - 语义**被修正（文档滞后于实现）**：A6 文件名不匹配在 `1f42bfe` 当天就已修复，而本文档在同一次工作的**稍后**提交（doc `e396773` @10:36 > impl `1f42bfe` @10:22），内容却仍写着「修复不在本次任务范围」。⇒ **提交时间在后 ≠ 内容已吸收**：文档抄的是落笔那一刻的事实，而修正在它落笔之前就已发生。**教训：写下「未实现」这类否定性断言前，先 `git log` 对照 impl 的最新提交**——否则会把"已修"写成"未修"，让后来者（包括我自己）重复排查一个已不存在的缺陷。
+  - 判据**被加强**：A6 原判据只有「落盘文件名清点」（环境事实），补上**行为判据**（`session_eject_status` 能否答出 `sessionId/file/totalSteps`）——环境事实证明不了工具行为（§5.9 规则 6 同型：读数要标注它说的是哪个域）。
+  - 边界**被如实标注**：旧名兼容分支线上**测不到**（线上 0 个旧名文件）——是「测不到」，不是「未修」。
 
 ## 10 · 未决问题
 
-- **U1 文件名不匹配（A6）**：`collectSessionFiles` 应匹配 `session.v3.jsonl.zstd`/`session.v2.jsonl.zstd`（或「前缀 `session` + 后缀 `.jsonl.zstd`」）。倾向：后缀匹配并保留旧名兼容；**本任务不改源码**，交主人/爱丽丝定修复批次。
+- ~~**U1 文件名不匹配（A6）**~~ ⇒ **已解决**（2026-09-14 `1f42bfe` 修复；2026-09-22 复核回写）：按「前缀 `session` + 后缀 `.jsonl.zstd`」正则匹配并保留旧名兼容，补了回归测试 `tests/session-file.test.mjs`。遗留只有「旧名分支线上测不到」一点，已记入 §8。
 - **U2 自动面可维护性（§5.22）**：自动触发应落侧车轨迹（`<DSH_HOME>/session-eject-trace.jsonl`：`atMs/phase/channel/markerCount/removedSteps`），否则事后不可查。
 - **U3 退出 vs 显式重启**：自动面 `setTimeout(() => process.exit(0), 1000)` 依赖 watch/guardian 拉起（§5.19 单点所有权成立与否取决于守护在线）。倾向保持现状（退出更轻），但要确认守护一定在。
 - **U4 注册表登记**：`docs/semantics/registry.json` 尚无本条目（本任务禁改注册表）——由主 agent 用 `semantic_register` 登记（`status: draft`、`doc: self-plugins/dsh-session-eject/docs/semantic.md`、`impl` 取 §8 三源文件）。
