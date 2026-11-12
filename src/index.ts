@@ -127,6 +127,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'session_eject_recent',
+    deferLoading: true,
     description: '删除会话最近 N 帧（DSH step 粒度，一帧=一次完整思考+工具调用链）并从上下文剔除。用于第三方服务审核场景：会话混入敏感内容后调用，物理删除事件（重写 session.jsonl.zstd）+ 清理派生缓存；执行后需重启 web 生效（爱丽丝随后调 daemon_restart）。缺省操作当前最新会话，可指定任意 sessionId。',
     parameters: {
       frames: { type: 'number', description: '删除的帧数（最近 N 个 step；含其全部 chunk/工具调用事件）', required: true },
@@ -175,6 +176,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'session_eject_status',
+    deferLoading: true,
     description: '会话删帧诊断：查看最新/指定会话的文件、step 帧总数、事件行规模、自动触发状态。删帧前调用以确认目标与帧数。',
     parameters: {
       sessionId: { type: 'string', description: '目标会话 id（缺省=最新活跃会话）' },
@@ -238,6 +240,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'session_eject_repair',
+    deferLoading: true,
     description: '修复会话日志的 seq 断档（不删帧，只 rebase）。当 session_eject_status 报告 hasSeqGap=true 时调用：把所有行 seq 从 0 重编，使整个文件连续。修复后需重启 web 生效。',
     parameters: {
       sessionId: { type: 'string', description: '目标会话 id（缺省=最新活跃会话）' },
